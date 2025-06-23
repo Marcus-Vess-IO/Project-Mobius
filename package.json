@@ -1,0 +1,22 @@
+{
+  "name": "hello-world",
+  "version": "1.0.0",
+  "description": "First attempt at using Neurosity SDK",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "neuralControl": "node ./apps/neuralControl/index.js",
+    "stateSense": "node ./apps/stateSense/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "neurosity"
+  ],
+  "author": "Marcus Vess",
+  "license": "MIT",
+  "dependencies": {
+    "@neurosity/sdk": "^6.5.10",
+    "dotenv": "^16.5.0"
+  }
+}
