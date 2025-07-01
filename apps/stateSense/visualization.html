@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neurosity Live Visualization</title>
+    <style>
+        body { font-family: sans-serif; }
+        #output { white-space: pre; font-size: 1.1em; }
+        .band { margin-bottom: 1em; }
+        .band-title { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Neurosity Live Normalized Data</h1>
+    <div id="output">Waiting for data...</div>
+    <script>
+        const output = document.getElementById('output');
+        const ws = new WebSocket('ws://localhost:8081');
+        ws.onopen = () => output.textContent = 'Connected. Waiting for normalized data...';
+        ws.onmessage = (event) => {
+            const normalized = JSON.parse(event.data);
+            let html = '';
+            for (const band in normalized) {
+                html += `<div class="band"><span class="band-title">${band}:</span><br>${JSON.stringify(normalized[band], null, 2)}</div>`;
+            }
+            output.innerHTML = html;
+        };
+        ws.onerror = (err) => output.textContent = 'WebSocket error: ' + err.message;
+        ws.onclose = () => output.textContent = 'WebSocket connection closed.';
+    </script>
+</body>
+</html>
