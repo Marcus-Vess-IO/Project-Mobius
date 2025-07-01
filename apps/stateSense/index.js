@@ -1,10 +1,13 @@
 import { createNeurosity } from '../../src/neurosity.js';
 import { verifyEnvs, getCredentials } from '../../src/auth.js';
 import { setupGracefulExit } from '../../src/gracefulExit.js';
-import { WebSocketServer } from 'ws';
 import open from 'open';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import https from 'https';
+import selfsigned from 'selfsigned';
+import { WebSocketServer } from 'ws';
+import fs from 'fs';
 
 // Authentication and device setup
 const { deviceId, email, password } = getCredentials();
@@ -16,15 +19,96 @@ const neurosity = createNeurosity(deviceId);
 // Baseline collection settings
 const BASELINE_DURATION_SEC = 5;
 const baselineData = [];
+let baselineAverages = null;
+let liveSubscription = null;
 
-// WebSocket server for visualization
-const wss = new WebSocketServer({ port: 8081 });
+// Function to overwrite and nullify sensitive data arrays
+function secureClearArray(arr) {
+    if (!Array.isArray(arr)) return;
+    for (let i = 0; i < arr.length; i++) {
+        if (typeof arr[i] === "object" && arr[i] !== null) {
+            for (const key in arr[i]) {
+                arr[i][key] = "cleared";
+            }
+        }
+        arr[i] = "cleared";
+    }
+    arr.length = 0;
+}
+
+// Function to nullify sensitive data objects
+function secureClearObject(obj) {
+    if (typeof obj !== "object" || obj === null) return;
+    for (const key in obj) {
+        obj[key] = "cleared";
+    }
+}
+
+// Secure cleanup function for all sensitive data
+function secureCleanupAndExit(code = 0) {
+    try {
+        secureClearArray(baselineData);
+        secureClearObject(baselineAverages);
+        baselineAverages = null;
+        if (global.gc) global.gc();
+    } catch (e) {
+        // Ignore errors during cleanup
+    }
+    process.exit(code);
+}
+
+// --- Encrypted WebSocket Server Setup (wss://) ---
+const attrs = [{ name: 'commonName', value: 'localhost' }];
+const pems = selfsigned.generate(attrs, { days: 365 });
+
+const server = https.createServer({
+    key: pems.private,
+    cert: pems.cert
+});
+
+// Serve visualization.html over HTTPS
+server.on('request', (req, res) => {
+    if (req.url === '/' || req.url === '/visualization.html') {
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        const vizPath = path.join(__dirname, 'visualization.html');
+        fs.readFile(vizPath, (err, data) => {
+            if (err) {
+                res.writeHead(404);
+                res.end('Not found');
+            } else {
+                res.writeHead(200, { 'Content-Type': 'text/html' });
+                res.end(data);
+            }
+        });
+    } else {
+        res.writeHead(404);
+        res.end('Not found');
+    }
+});
+
+server.listen(8081);
+
+const wss = new WebSocketServer({ server });
 function broadcastNormalized(normalized) {
     const msg = JSON.stringify(normalized);
     wss.clients.forEach(client => {
         if (client.readyState === 1) client.send(msg);
     });
 }
+
+// Subscribe to accelerometer data and broadcast to clients
+const accelSubscription = neurosity.accelerometer().subscribe((accelData) => {
+    wss.clients.forEach(client => {
+        if (client.readyState === 1) client.send(JSON.stringify({ type: "accel", accel: accelData }));
+    });
+});
+setupGracefulExit({
+    unsubscribe: () => {
+        accelSubscription.unsubscribe();
+        secureCleanupAndExit(0);
+    }
+});
 
 // Function to calculate baseline averages from collected data
 const calculateBaselineAverages = (baselineData) => {
@@ -57,21 +141,24 @@ const normalizeSample = (sample, baselineAverages) => {
     bandNames.forEach(band => {
         normalized[band] = sample.data[band].map((val, idx) => {
             const baseline = baselineAverages[band][idx];
-            // Avoid division by zero
             return baseline !== 0 ? val / baseline : 0;
         });
     });
     return normalized;
 };
 
+
+// Save the certificate to disk for manual installation
+fs.writeFileSync('localhost-cert.pem', pems.cert);
+
 // Main function to handle login, data collection, and visualization
+
 const main = async () => {
     try {
         await neurosity.login({ email, password });
         console.log('Logged in. Collecting baseline data...');
 
         let timerStarted = false;
-        let baselineAverages = null;
 
         const subscription = neurosity.brainwaves("powerByBand").subscribe((data) => {
             if (
@@ -88,7 +175,6 @@ const main = async () => {
                         subscription.unsubscribe();
                         console.log("\nBaseline collection complete.");
 
-                        // Now filter for valid samples
                         const validBaselineData = baselineData.filter(
                             d =>
                                 d &&
@@ -99,19 +185,16 @@ const main = async () => {
                         );
 
                         if (validBaselineData.length > 0) {
-                            // Calculate averages from valid baseline data
                             baselineAverages = calculateBaselineAverages(validBaselineData);
 
-                            // Start live normalization after baseline is collected
                             console.log("Starting live normalization...");
-                            
-                            // Open visualization.html in the default browser
+
                             const __filename = fileURLToPath(import.meta.url);
                             const __dirname = path.dirname(__filename);
                             const vizPath = path.join(__dirname, 'visualization.html');
-                            open(vizPath);
+                            open('https://localhost:8081/visualization.html');
 
-                            const liveSubscription = neurosity.brainwaves("powerByBand").subscribe((liveData) => {
+                            liveSubscription = neurosity.brainwaves("powerByBand").subscribe((liveData) => {
                                 if (
                                     liveData &&
                                     typeof liveData === "object" &&
@@ -120,29 +203,41 @@ const main = async () => {
                                     Object.keys(liveData.data).length > 0
                                 ) {
                                     const normalized = normalizeSample(liveData, baselineAverages);
-                                    broadcastNormalized(normalized); // Send to all connected clients
+                                    broadcastNormalized(normalized);
                                 }
                             });
-                            setupGracefulExit(liveSubscription);
 
-                            // Add a hard timer for 5 minutes (300,000 ms)
+                            // Hard timer for 5 minutes
                             setTimeout(() => {
                                 console.log("Live visualization time limit reached (5 minutes). Exiting program.");
-                                liveSubscription.unsubscribe();
-                                process.exit(0);
+                                if (liveSubscription) liveSubscription.unsubscribe();
+                                secureCleanupAndExit(0);
                             }, 5 * 60 * 1000);
+
+                            setupGracefulExit({
+                                unsubscribe: () => {
+                                    if (liveSubscription) liveSubscription.unsubscribe();
+                                    secureCleanupAndExit(0);
+                                }
+                            });
+                        } else {
+                            secureCleanupAndExit(1);
                         }
-                        // Do not exit here, keep running for live normalization
                     }, BASELINE_DURATION_SEC * 1000);
                 }
             }
         });
 
-        setupGracefulExit(subscription);
-        
+        setupGracefulExit({
+            unsubscribe: () => {
+                subscription.unsubscribe();
+                secureCleanupAndExit(0);
+            }
+        });
+
     } catch (err) {
         console.error("Fatal error:", err);
-        process.exit(1);
+        secureCleanupAndExit(1);
     }
 };
 

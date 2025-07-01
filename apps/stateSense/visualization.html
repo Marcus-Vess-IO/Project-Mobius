@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Neurosity Live Visualization</title>
+    <title>Neurosity Live Normalized Data</title>
     <style>
         body { font-family: sans-serif; }
         #output { white-space: pre; font-size: 1.1em; }
@@ -15,7 +15,8 @@
     <div id="output">Waiting for data...</div>
     <script>
         const output = document.getElementById('output');
-        const ws = new WebSocket('ws://localhost:8081');
+        // Use wss:// if your backend is using TLS/SSL, otherwise ws://
+        const ws = new WebSocket('wss://localhost:8081');
         ws.onopen = () => output.textContent = 'Connected. Waiting for normalized data...';
         ws.onmessage = (event) => {
             const normalized = JSON.parse(event.data);
