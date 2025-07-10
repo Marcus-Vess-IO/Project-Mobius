@@ -2,32 +2,156 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Neurosity Live Normalized Data</title>
+    <title>Brain Visualization</title>
     <style>
-        body { font-family: sans-serif; }
-        #output { white-space: pre; font-size: 1.1em; }
-        .band { margin-bottom: 1em; }
-        .band-title { font-weight: bold; }
+        body { font-family: sans-serif; margin: 0; overflow: hidden; }
+        #output { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.8); padding: 4px; z-index: 10; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
-    <h1>Neurosity Live Normalized Data</h1>
+    <!-- Empty handlers to ensure they're defined before preload script runs -->
     <div id="output">Waiting for data...</div>
-    <script>
+    <script type="module">
+        import * as THREE from './three.module.js';
+        import { OBJLoader } from './OBJLoader.js';
+
         const output = document.getElementById('output');
-        // Use wss:// if your backend is using TLS/SSL, otherwise ws://
-        const ws = new WebSocket('wss://localhost:8081');
-        ws.onopen = () => output.textContent = 'Connected. Waiting for normalized data...';
-        ws.onmessage = (event) => {
-            const normalized = JSON.parse(event.data);
-            let html = '';
-            for (const band in normalized) {
-                html += `<div class="band"><span class="band-title">${band}:</span><br>${JSON.stringify(normalized[band], null, 2)}</div>`;
+        output.textContent = 'Three.js ES Module script running...';
+
+        // Listen for custom events from preload
+        window.addEventListener('normalized-data', (event) => {
+            const normalized = event.detail;
+            output.textContent = 'Received normalized data:\n' + JSON.stringify(normalized, null, 2);
+            updateBrainHeatmap(normalized, "alpha");
+        });
+        window.addEventListener('neurosity-error', (event) => {
+            output.textContent = 'Neurosity error: ' + event.detail;
+        });
+
+        // Register listeners for IPC events
+        if (window.electronAPI) {
+            window.electronAPI.onNormalizedData();
+            window.electronAPI.onNeurosityError();
+        }
+
+        let scene = new THREE.Scene();
+        let camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        let renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambient);
+        const directional = new THREE.DirectionalLight(0xffffff, 0.7);
+        directional.position.set(1, 1, 1);
+        scene.add(directional);
+
+        camera.position.z = 3;
+
+        let brainMesh = null;
+        let regionVertexMap = null;
+
+        const sensorNames = ['CP3', 'C3', 'F5', 'PO3', 'PO4', 'F6', 'C4', 'CP4'];
+        const sensorPositions = [
+            new THREE.Vector3(-0.5, 0.8, 0.0), // CP3
+            new THREE.Vector3(-0.7, 0.5, 0.1), // C3
+            new THREE.Vector3(-0.8, 1.1, 0.3), // F5
+            new THREE.Vector3(-0.4, 0.2, -0.6), // PO3
+            new THREE.Vector3(0.4, 0.2, -0.6), // PO4
+            new THREE.Vector3(0.8, 1.1, 0.3), // F6
+            new THREE.Vector3(0.7, 0.5, 0.1), // C4
+            new THREE.Vector3(0.5, 0.8, 0.0)  // CP4
+        ];
+
+        const loader = new OBJLoader();
+        loader.load(
+            './brain.obj',
+            function (object) {
+                object.traverse(function (child) {
+                    if (child.isMesh) {
+                        child.material = new THREE.MeshStandardMaterial({ color: 0xcccccc, vertexColors: true });
+                        brainMesh = child;
+                    }
+                });
+
+                if (!brainMesh) {
+                    object.traverse(function (child) {
+                        if (child.geometry) {
+                            child.material = new THREE.MeshStandardMaterial({ vertexColors: true });
+                            brainMesh = child;
+                        }
+                    });
+                }
+
+                object.scale.set(1, 1, 1);
+                scene.add(object);
+
+                if (brainMesh) {
+                    const geometry = brainMesh.geometry;
+                    const posAttr = geometry.attributes.position;
+                    if (!geometry.attributes.color) {
+                        const colors = [];
+                        for (let i = 0; i < posAttr.count; i++) {
+                            colors.push(0.8, 0.8, 0.8);
+                        }
+                        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                    }
+
+                    regionVertexMap = Array(sensorPositions.length).fill().map(() => []);
+                    for (let i = 0; i < posAttr.count; i++) {
+                        const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+                        let minDist = Infinity, regionIdx = 0;
+                        sensorPositions.forEach((sensorPos, idx) => {
+                            const dist = v.distanceTo(sensorPos);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                regionIdx = idx;
+                            }
+                        });
+                        regionVertexMap[regionIdx].push(i);
+                    }
+                }
+                animate();
+            },
+            undefined,
+            function (error) {
+                output.textContent = 'Error loading brain.obj';
             }
-            output.innerHTML = html;
-        };
-        ws.onerror = (err) => output.textContent = 'WebSocket error: ' + err.message;
-        ws.onclose = () => output.textContent = 'WebSocket connection closed.';
+        );
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (brainMesh) brainMesh.rotation.y += 0.01;
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        function updateBrainHeatmap(normalized, band = "alpha") {
+            if (!brainMesh || !regionVertexMap) return;
+            const geometry = brainMesh.geometry;
+            const colorAttr = geometry.attributes.color;
+
+            for (let regionIdx = 0; regionIdx < regionVertexMap.length; regionIdx++) {
+                const value = normalized[band][regionIdx];
+                const color = valueToHeatColor(value);
+
+                regionVertexMap[regionIdx].forEach(i => {
+                    colorAttr.setXYZ(i, color.r, color.g, color.b);
+                });
+            }
+            colorAttr.needsUpdate = true;
+        }
+
+        function valueToHeatColor(val) {
+            val = Math.max(0, Math.min(1, val));
+            return new THREE.Color().setRGB(val, 0, 1 - val);
+        }
     </script>
 </body>
 </html>
