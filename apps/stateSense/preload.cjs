@@ -10,5 +10,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('neurosity-error', (event, errorMsg) => {
             window.dispatchEvent(new CustomEvent('neurosity-error', { detail: errorMsg }));
         });
+    },
+    onAccelerometerData: () => {
+        ipcRenderer.on('accelerometer-data', (event, accelData) => {
+            window.dispatchEvent(new CustomEvent('accelerometer-data', { detail: accelData }));
+        });
+    },
+    onSignalQuality: () => {
+        ipcRenderer.on('signal-quality', (event, data) => {
+            window.dispatchEvent(new CustomEvent('signal-quality', { detail: data }));
+        });
     }
 });

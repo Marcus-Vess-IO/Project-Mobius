@@ -1,69 +1,639 @@
+</html>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Brain Visualization</title>
     <style>
-        body { font-family: sans-serif; margin: 0; overflow: hidden; }
-        #output { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.8); padding: 4px; z-index: 10; }
-        canvas { display: block; }
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            min-height: 100vh;
+            min-width: 100vw;
+            font-family: sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background: radial-gradient(circle at 60% 40%, #e3eaf3 0%, #c7d0db 60%, #b3c2d9 100%);
+        }
+        #legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.85);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 15px;
+            z-index: 20;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .legend-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 2px;
+        }
+        .legend-color {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            margin-right: 8px;
+            border: 1px solid #888;
+            display: inline-block;
+        }
+
+        /* Sidebar Menu */
+        #menu-sidebar {
+            position: fixed;
+            top: 15%;
+            right: 0;
+            width: 320px;
+            height: 70vh;
+            background: rgba(255,255,255,0.8);
+            border-radius: 18px 0 0 18px;
+            box-shadow: -2px 0 12px rgba(0,0,0,0.08);
+            z-index: 3000;
+            transform: translateX(110%);
+            transition: transform 0.3s cubic-bezier(.4,0,.2,1);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 28px 28px 18px 28px;
+            pointer-events: auto;
+        }
+        #menu-sidebar.active {
+            transform: translateX(0);
+        }
+        #menu-sidebar .close-btn {
+            position: absolute;
+            top: 12px;
+            right: 18px;
+            font-size: 1.5em;
+            background: none;
+            border: none;
+            color: #333;
+            cursor: pointer;
+            opacity: 0.7;
+        }
+        #menu-sidebar h2 {
+            margin-top: 0;
+            margin-bottom: 18px;
+            font-size: 1.4em;
+            font-weight: 600;
+        }
+        #menu-sidebar button {
+            margin: 10px 0;
+            padding: 10px 28px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            border: none;
+            background: #e3eaf3;
+            color: #222;
+            cursor: pointer;
+            transition: background 0.15s;
+            width: 100%;
+            text-align: left;
+        }
+        #menu-sidebar button:hover {
+            background: #b3c2d9;
+        }
+        #menu-sidebar.disabled {
+            pointer-events: none;
+            opacity: 0.5;
+        }
+
+        /* Placement Assist Sidebar */
+        #placement-sidebar {
+            position: fixed;
+            top: 15%;
+            left: 0;
+            width: 320px;
+            height: 70vh;
+            background: rgba(255,255,255,0.8);
+            border-radius: 0 18px 18px 0;
+            box-shadow: 2px 0 12px rgba(0,0,0,0.08);
+            z-index: 2001;
+            transform: translateX(-110%);
+            transition: transform 0.3s cubic-bezier(.4,0,.2,1);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 28px 28px 18px 28px;
+        }
+        #placement-sidebar.active {
+            transform: translateX(0);
+        }
+        #placement-sidebar .close-btn {
+            position: absolute;
+            top: 12px;
+            left: 18px;
+            font-size: 1.5em;
+            background: none;
+            border: none;
+            color: #333;
+            cursor: pointer;
+            opacity: 0.7;
+        }
+        #placement-sidebar h2 {
+            margin-top: 0;
+            margin-bottom: 18px;
+            font-size: 1.4em;
+            font-weight: 600;
+        }
+        #placement-3d-canvas {
+            width: 220px;
+            height: 180px;
+            margin: 0 auto 18px auto;
+            display: block;
+            background: #e3eaf3;
+            border-radius: 12px;
+        }
+
+        /* Startup Sequence Overlay (modal, blocks everything) */
+        .overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(240, 245, 255, 0.85);
+            z-index: 2000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.18s;
+        }
+        .overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal {
+            background: rgba(255,255,255,0.98);
+            border-radius: 18px;
+            padding: 32px 36px 28px 36px;
+            min-width: 340px;
+            max-width: 420px;
+            box-sizing: border-box;
+            text-align: center;
+            transition: box-shadow 0.2s;
+        }
+        .modal h2 {
+            margin-top: 0;
+            margin-bottom: 18px;
+            font-size: 1.5em;
+            font-weight: 600;
+        }
+        .modal button {
+            margin-top: 18px;
+            padding: 10px 28px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            border: none;
+            background: #e3eaf3;
+            color: #222;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .modal button:hover {
+            background: #b3c2d9;
+        }
+        .modal .step {
+            margin-bottom: 16px;
+            font-size: 1.1em;
+        }
+        /* Placement 3D canvas for modal (if you want to add it in the modal in the future) */
+        #placement-3d-canvas-modal {
+            width: 220px;
+            height: 180px;
+            margin: 0 auto 18px auto;
+            display: block;
+            background: #e3eaf3;
+            border-radius: 12px;
+        }
+        .overlay.hide-modal .modal {
+            display: none !important;
+        }
+        .overlay.hide-modal {
+            background: rgba(240, 245, 255, 0.0);
+        }
     </style>
 </head>
 <body>
-    <!-- Empty handlers to ensure they're defined before preload script runs -->
-    <div id="output">Waiting for data...</div>
+    <!-- EEG band color legend -->
+    <div id="legend">
+        <div class="legend-row"><span class="legend-color" style="background:#0000ff"></span>Delta (0.5–4 Hz)</div>
+        <div class="legend-row"><span class="legend-color" style="background:#00ffff"></span>Theta (4–8 Hz)</div>
+        <div class="legend-row"><span class="legend-color" style="background:#00ff00"></span>Alpha (8–13 Hz)</div>
+        <div class="legend-row"><span class="legend-color" style="background:#ffff00"></span>Beta (13–30 Hz)</div>
+        <div class="legend-row"><span class="legend-color" style="background:#ff0000"></span>Gamma (30–100 Hz)</div>
+    </div>
+
+    <!-- Startup Sequence Overlay (blocks everything) -->
+    <div id="startup-sequence" class="overlay active">
+        <div class="modal" id="startup-modal">
+            <!-- Steps will be injected here by JS -->
+        </div>
+    </div>
+
+    <!-- Sidebar Menu (right) -->
+    <div id="menu-sidebar">
+        <button class="close-btn" id="close-menu-btn" title="Close">&times;</button>
+        <h2>Menu</h2>
+        <button id="reset-session-btn">Reset</button>
+        <button id="signal-toggle-btn">Signal</button>
+        <button id="position-btn">Position</button>
+    </div>
+
+    <!-- Placement Assist Sidebar (left) -->
+    <div id="placement-sidebar">
+        <button class="close-btn" id="close-placement-btn" title="Close">&times;</button>
+        <h2>Placement Assist</h2>
+        <canvas id="placement-3d-canvas"></canvas>
+        <div id="placement-assist-content">
+            <p id="placement-assist-message">Adjust the headset until the crown is properly positioned.</p>
+        </div>
+    </div>
+
     <script type="module">
+        // Import Three.js and helpers for 3D rendering and controls
         import * as THREE from './three.module.js';
         import { OBJLoader } from './OBJLoader.js';
+        import { OrbitControls } from './OrbitControls.js';
 
-        const output = document.getElementById('output');
-        output.textContent = 'Three.js ES Module script running...';
+        // --- Overlay and Sidebar DOM Elements ---
+        const startupOverlay = document.getElementById('startup-sequence');
+        const menuSidebar = document.getElementById('menu-sidebar');
+        const placementSidebar = document.getElementById('placement-sidebar');
+        const closeMenuBtn = document.getElementById('close-menu-btn');
+        const closePlacementBtn = document.getElementById('close-placement-btn');
+        const signalToggleBtn = document.getElementById('signal-toggle-btn');
+        const positionBtn = document.getElementById('position-btn');
+        const placementAssistMessage = document.getElementById('placement-assist-message');
 
-        // Listen for custom events from preload
+        let appState = 'startup'; // Tracks if we're in startup or main session
+        let signalActive = false; // Tracks if signal quality spheres are shown
+
+        // --- Startup Sequence Modal Logic ---
+        const startupModal = document.getElementById('startup-modal');
+        let startupStep = 0;
+        let relaxTimeout = null;
+        // Steps for the startup sequence modal
+        const startupSteps = [
+            {
+                html: `<h2>Welcome</h2>
+                <div class="step">Press <b>start</b> to begin session.</div>
+                <button id="startup-next-btn">Start</button>`
+            },
+            {
+                html: `<h2>Please Relax</h2>
+                    <div class="step">Sit comfortably, we will begin soon.</div>`
+            },
+            {
+                html: `<h2>Headset Placement</h2>
+                    <div class="step">Please move the headset as shown.<br>Ensure all sensors make good contact.</div>
+                    <button id="startup-next-btn">Continue</button>`
+            },
+            {
+                html: `<h2>Collecting Baseline</h2>
+                    <div class="step">Remain relaxed and still.</div>
+                    <button id="startup-next-btn" disabled>Collecting...</button>`
+            }
+        ];
+
+        // Start session: called from menu or after startup
+        function startSession() {
+            appState = 'main';
+            openPlacementSidebar();
+        }
+
+        // Show a step in the startup sequence modal
+        function showStartupStep(step) {
+            startupModal.innerHTML = startupSteps[step].html;
+            if (relaxTimeout) {
+                clearTimeout(relaxTimeout);
+                relaxTimeout = null;
+            }
+            const nextBtn = document.getElementById('startup-next-btn');
+
+            // Placement Assist logic for headset placement step
+            if (step === 2) {
+                openPlacementSidebar();
+                placementAssistMessage.textContent = "Adjust the headset until the crown is properly positioned.";
+                placementGood = false;
+                placementGoodStart = null;
+                // Hide the modal, but keep the overlay to block interaction with the main scene
+                startupOverlay.classList.add('hide-modal');
+                menuSidebar.style.pointerEvents = "auto";
+                menuSidebar.style.zIndex = "3000";
+                if (nextBtn) nextBtn.disabled = true;
+            } else {
+                closePlacementSidebar();
+                startupOverlay.classList.remove('hide-modal');
+                menuSidebar.style.pointerEvents = "";
+                menuSidebar.style.zIndex = "";
+            }
+            if (step === 1) {
+                relaxTimeout = setTimeout(() => {
+                    startupStep++;
+                    showStartupStep(startupStep);
+                }, 5000);
+            } else if (step < 3 && nextBtn) {
+                nextBtn.onclick = () => {
+                    startupStep++;
+                    showStartupStep(startupStep);
+                };
+            }
+            if (step === 3) {
+                setTimeout(() => {
+                    if (nextBtn) {
+                        nextBtn.disabled = false;
+                        nextBtn.textContent = "Begin Session";
+                        nextBtn.onclick = () => {
+                            startupOverlay.classList.remove('active');
+                            appState = 'main';
+                        };
+                    }
+                }, 2500);
+            }
+        }
+        showStartupStep(startupStep);
+
+        // --- Sidebar Menu Logic ---
+        function openMenuSidebar() {
+            menuSidebar.classList.add('active');
+        }
+        function closeMenuSidebar() {
+            menuSidebar.classList.remove('active');
+        }
+        closeMenuBtn.onclick = closeMenuSidebar;
+
+        // --- Placement Sidebar Logic ---
+        function openPlacementSidebar() {
+            placementSidebar.classList.add('active');
+        }
+        function closePlacementSidebar() {
+            placementSidebar.classList.remove('active');
+        }
+        closePlacementBtn.onclick = closePlacementSidebar;
+
+        // --- Menu Button Actions ---
+        document.getElementById('reset-session-btn').onclick = () => {
+            closeMenuSidebar();
+            closePlacementSidebar();
+            startupStep = 0;
+            showStartupStep(0);
+            startupOverlay.classList.add('active');
+            appState = 'startup';
+            signalActive = false;
+            updateSignalQualitySpheres();
+        };
+
+        signalToggleBtn.onclick = () => {
+            signalActive = !signalActive;
+            signalToggleBtn.textContent = signalActive ? "Signal: ON" : "Signal: OFF";
+            updateSignalQualitySpheres();
+        };
+
+        positionBtn.onclick = () => {
+            openPlacementSidebar();
+        };
+
+        // --- Keyboard: ESC closes both sidebars if open, unless in startup ---
+        document.addEventListener('keydown', (e) => {
+            if (appState === 'startup') return;
+            if (e.key === "Escape") {
+                closeMenuSidebar();
+                closePlacementSidebar();
+            }
+            if (e.key.toLowerCase() === "m") {
+                if (menuSidebar.classList.contains('active')) {
+                    closeMenuSidebar();
+                } else {
+                    openMenuSidebar();
+                }
+            }
+        });
+
+        // --- Signal Quality Logic ---
+        const SIGNAL_COLORS = [
+            new THREE.Color(0xff3333), // Red
+            new THREE.Color(0xffe066), // Yellow
+            new THREE.Color(0x33cc33)  // Green
+        ];
+        let lastSignalQuality = [];
+        let sensorSpheres = [];
+
+        // Listen for signal quality events and update spheres
+        window.addEventListener('signal-quality', (event) => {
+            lastSignalQuality = event.detail;
+            updateSignalQualitySpheres();
+        });
+
+        // Update the color of sensor spheres based on signal quality
+        function updateSignalQualitySpheres() {
+            if (!sensorSpheres.length) return;
+            for (let i = 0; i < sensorSpheres.length; i++) {
+                if (
+                    signalActive &&
+                    Array.isArray(lastSignalQuality) &&
+                    lastSignalQuality[i] &&
+                    typeof lastSignalQuality[i].standardDeviation === "number"
+                ) {
+                    const { standardDeviation, status } = lastSignalQuality[i];
+                    if (status === "great" && standardDeviation >= 1.5 && standardDeviation <= 10) {
+                        sensorSpheres[i].material.color.set(0x33cc33); // Green
+                    } else if (standardDeviation > 10 && standardDeviation <= 50) {
+                        sensorSpheres[i].material.color.set(0xffe066); // Yellow
+                    } else {
+                        sensorSpheres[i].material.color.set(0xff3333); // Red
+                    }
+                } else {
+                    sensorSpheres[i].material.color.set(0x222222); // Default
+                }
+            }
+        }
+
+        // --- Placement Assist Sidebar 3D Figure (placeholder) ---
+        let placementScene, placementCamera, placementRenderer, placementBox;
+        function initPlacement3D() {
+            const canvas = document.getElementById('placement-3d-canvas');
+            placementScene = new THREE.Scene();
+            placementCamera = new THREE.PerspectiveCamera(45, canvas.width / canvas.height, 0.1, 10);
+            placementCamera.position.set(0, 0, 2);
+            placementRenderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+            placementRenderer.setClearColor(0x000000, 0);
+
+            // Simple box as a placeholder for the crown model
+            const geometry = new THREE.BoxGeometry(1, 0.5, 0.5);
+            const material = new THREE.MeshStandardMaterial({ color: 0x6699cc });
+            placementBox = new THREE.Mesh(geometry, material);
+            placementScene.add(placementBox);
+
+            // Lighting for the 3D box
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(2, 2, 2);
+            placementScene.add(light);
+
+            animatePlacement3D();
+        }
+        function animatePlacement3D() {
+            requestAnimationFrame(animatePlacement3D);
+            if (placementBox) placementBox.rotation.y += 0.01;
+            if (placementRenderer && placementScene && placementCamera)
+                placementRenderer.render(placementScene, placementCamera);
+        }
+        initPlacement3D();
+
+        // --- Placement Assist Logic: Update message and auto-close on good placement ---
+        // Placement parameters for "good" placement
+        const FILLER_X_MIN = 0.00, FILLER_X_MAX = 0.05;
+        const FILLER_Y_MIN = -0.90, FILLER_Y_MAX = -0.80;
+        const FILLER_Z_MIN = -0.55, FILLER_Z_MAX = -0.40;
+
+        let placementGood = false;
+        let placementGoodStart = null;
+
+        // Listen for accelerometer data and update placement assist UI
+        window.addEventListener('accelerometer-data', (event) => {
+            const accel = event.detail;
+            if (accel && typeof accel.x === "number" && typeof accel.y === "number" && typeof accel.z === "number") {
+                const good =
+                    accel.x >= FILLER_X_MIN && accel.x <= FILLER_X_MAX &&
+                    accel.y >= FILLER_Y_MIN && accel.y <= FILLER_Y_MAX &&
+                    accel.z >= FILLER_Z_MIN && accel.z <= FILLER_Z_MAX;
+
+                // Placement assist logic for startup sequence
+                if (startupStep === 2 && placementSidebar.classList.contains('active')) {
+                    if (good) {
+                        if (!placementGood) {
+                            placementGoodStart = Date.now();
+                            placementGood = true;
+                        } else if (placementGoodStart && (Date.now() - placementGoodStart > 2000)) {
+                            closePlacementSidebar();
+                            placementGood = false;
+                            placementGoodStart = null;
+                            // Remove modal-hiding class so the next modal step appears
+                            startupOverlay.classList.remove('hide-modal');
+                            menuSidebar.style.pointerEvents = "";
+                            menuSidebar.style.zIndex = "";
+                            // Advance to next step automatically
+                            startupStep++;
+                            showStartupStep(startupStep);
+                            return;
+                        }
+                        placementAssistMessage.textContent = "Crown is properly positioned! Hold steady...";
+                    } else {
+                        placementGood = false;
+                        placementGoodStart = null;
+                        placementAssistMessage.textContent = "Adjust the headset until the crown is properly positioned.";
+                    }
+                }
+                // Placement assist logic for menu/manual use (unchanged)
+                else if (placementSidebar.classList.contains('active')) {
+                    if (good) {
+                        if (!placementGood) {
+                            placementGoodStart = Date.now();
+                            placementGood = true;
+                        } else if (placementGoodStart && (Date.now() - placementGoodStart > 3000)) {
+                            closePlacementSidebar();
+                            placementGood = false;
+                            placementGoodStart = null;
+                            return;
+                        }
+                        placementAssistMessage.textContent = "Crown is properly positioned! Hold steady...";
+                    } else {
+                        placementGood = false;
+                        placementGoodStart = null;
+                        placementAssistMessage.textContent = "Adjust the headset until the crown is properly positioned.";
+                    }
+                }
+            }
+        });
+
+        // --- Three.js and EEG logic for brain visualization ---
+        let baselineReady = false;
         window.addEventListener('normalized-data', (event) => {
+            baselineReady = true;
             const normalized = event.detail;
-            output.textContent = 'Received normalized data:\n' + JSON.stringify(normalized, null, 2);
-            updateBrainHeatmap(normalized, "alpha");
+            updateBrainHeatmap(normalized);
         });
         window.addEventListener('neurosity-error', (event) => {
-            output.textContent = 'Neurosity error: ' + event.detail;
+            // You may want to display this elsewhere if you remove #output
+            // output.textContent = 'Neurosity error: ' + event.detail;
         });
 
-        // Register listeners for IPC events
+        // --- Accelerometer integration for brain mesh orientation ---
+        let targetQuaternion = new THREE.Quaternion();
+        let accelQuatInitialized = false;
+
+        window.addEventListener('accelerometer-data', (event) => {
+            const accel = event.detail;
+            if (brainMesh && accel && typeof accel.x === "number" && typeof accel.y === "number" && typeof accel.z === "number") {
+                const down = new THREE.Vector3(-accel.x, accel.y, accel.z).normalize();
+                const modelDown = new THREE.Vector3(0, -1, 0);
+                const quat = new THREE.Quaternion().setFromUnitVectors(modelDown, down);
+                const tiltQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), THREE.MathUtils.degToRad(-15));
+                quat.multiply(tiltQuat);
+                targetQuaternion.copy(quat);
+                accelQuatInitialized = true;
+            }
+        });
+
+        // --- Electron API hooks (if running in Electron) ---
         if (window.electronAPI) {
             window.electronAPI.onNormalizedData();
             window.electronAPI.onNeurosityError();
+            window.electronAPI.onAccelerometerData();
+            window.electronAPI.onSignalQuality();
         }
 
+        // --- Three.js scene setup for brain visualization ---
         let scene = new THREE.Scene();
+
         let camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2.0, -1.5);
+        camera.lookAt(0, 0.7, 0);
+
         let renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
+        // Lighting for the brain model
         const ambient = new THREE.AmbientLight(0xffffff, 0.7);
         scene.add(ambient);
         const directional = new THREE.DirectionalLight(0xffffff, 0.7);
         directional.position.set(1, 1, 1);
         scene.add(directional);
+        scene.background = new THREE.Color(0xe3eaf3);
 
-        camera.position.z = 3;
+        // Orbit controls for user interaction
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.1;
+        controls.screenSpacePanning = false;
+        controls.minDistance = 0.5;
+        controls.maxDistance = 10;
 
+        // --- Brain mesh and sensor setup ---
         let brainMesh = null;
+        let sensorNames = [];
+        let sensorPositions = [];
         let regionVertexMap = null;
+        let vertexSensorInfluence = null;
+        let prevSensorDominantColors = [];
 
-        const sensorNames = ['CP3', 'C3', 'F5', 'PO3', 'PO4', 'F6', 'C4', 'CP4'];
-        const sensorPositions = [
-            new THREE.Vector3(-0.5, 0.8, 0.0), // CP3
-            new THREE.Vector3(-0.7, 0.5, 0.1), // C3
-            new THREE.Vector3(-0.8, 1.1, 0.3), // F5
-            new THREE.Vector3(-0.4, 0.2, -0.6), // PO3
-            new THREE.Vector3(0.4, 0.2, -0.6), // PO4
-            new THREE.Vector3(0.8, 1.1, 0.3), // F6
-            new THREE.Vector3(0.7, 0.5, 0.1), // C4
-            new THREE.Vector3(0.5, 0.8, 0.0)  // CP4
-        ];
+        // EEG band color mapping
+        const BAND_COLORS = {
+            delta: new THREE.Color(0x0000ff),
+            theta: new THREE.Color(0x00ffff),
+            alpha: new THREE.Color(0x00ff00),
+            beta:  new THREE.Color(0xffff00),
+            gamma: new THREE.Color(0xff0000)
+        };
+        const BAND_ORDER = ["delta", "theta", "alpha", "beta", "gamma"];
+        const FLESHY_PINK = new THREE.Color(0xebb5b5);
 
+        // Load the brain OBJ model and set up sensors
         const loader = new OBJLoader();
         loader.load(
             './brain.obj',
@@ -85,73 +655,191 @@
                 }
 
                 object.scale.set(1, 1, 1);
+                object.position.y = -0.5;
+                object.rotation.x = THREE.MathUtils.degToRad(-15);
                 scene.add(object);
 
                 if (brainMesh) {
                     const geometry = brainMesh.geometry;
                     const posAttr = geometry.attributes.position;
-                    if (!geometry.attributes.color) {
-                        const colors = [];
-                        for (let i = 0; i < posAttr.count; i++) {
-                            colors.push(0.8, 0.8, 0.8);
+                    const colors = [];
+                    for (let i = 0; i < posAttr.count; i++) {
+                        colors.push(FLESHY_PINK.r, FLESHY_PINK.g, FLESHY_PINK.b);
+                    }
+                    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+                    // Sensor definitions (positions and names)
+                    const electrodeDefs = [
+                        { name: 'CP3', x: -0.2, y: 1.1, z: -0.4 },
+                        { name: 'C3',  x: -0.2, y: 1.2, z: 0.0 },
+                        { name: 'F5',  x: -0.25,  y: 1.1, z: 0.4 },
+                        { name: 'PO3', x: -0.15,  y: 0.9, z: -0.6 },
+                        { name: 'PO4', mirrorFrom: 'PO3' },
+                        { name: 'F6',  mirrorFrom: 'F5' },
+                        { name: 'C4',  mirrorFrom: 'C3' },
+                        { name: 'CP4', mirrorFrom: 'CP3' }
+                    ];
+
+                    sensorNames = [];
+                    sensorPositions = [];
+                    const nameToIndex = {};
+                    for (let i = 0; i < electrodeDefs.length; i++) {
+                        const def = electrodeDefs[i];
+                        sensorNames.push(def.name);
+                        if (def.mirrorFrom) {
+                            const mirrorIdx = nameToIndex[def.mirrorFrom];
+                            const mirrorPos = sensorPositions[mirrorIdx];
+                            sensorPositions.push(new THREE.Vector3(
+                                -mirrorPos.x, mirrorPos.y, mirrorPos.z
+                            ));
+                        } else {
+                            sensorPositions.push(new THREE.Vector3(def.x, def.y, def.z));
                         }
-                        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                        nameToIndex[def.name] = i;
                     }
 
-                    regionVertexMap = Array(sensorPositions.length).fill().map(() => []);
+                    // Map mesh vertices to sensors for heatmap coloring
+                    const SENSOR_RADIUS = 0.3;
+                    vertexSensorInfluence = [];
                     for (let i = 0; i < posAttr.count; i++) {
                         const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
-                        let minDist = Infinity, regionIdx = 0;
-                        sensorPositions.forEach((sensorPos, idx) => {
-                            const dist = v.distanceTo(sensorPos);
-                            if (dist < minDist) {
-                                minDist = dist;
-                                regionIdx = idx;
+                        let influences = [];
+                        let totalWeight = 0;
+                        for (let s = 0; s < sensorPositions.length; s++) {
+                            const dist = v.distanceTo(sensorPositions[s]);
+                            if (dist < SENSOR_RADIUS) {
+                                const weight = 1 - (dist / SENSOR_RADIUS);
+                                influences.push({ sensorIdx: s, weight });
+                                totalWeight += weight;
                             }
-                        });
-                        regionVertexMap[regionIdx].push(i);
+                        }
+                        if (totalWeight > 0) {
+                            influences.forEach(inf => inf.weight /= totalWeight);
+                        }
+                        vertexSensorInfluence.push(influences);
+                    }
+
+                    // Add spheres and labels for each sensor
+                    for (let i = 0; i < sensorPositions.length; i++) {
+                        const sphereGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+                        const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+                        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+                        sphere.position.copy(sensorPositions[i]);
+                        brainMesh.add(sphere);
+                        sensorSpheres[i] = sphere;
+
+                        const sprite = makeTextSprite(sensorNames[i]);
+                        sprite.position.copy(sensorPositions[i]);
+                        sprite.position.y += 0.08;
+                        brainMesh.add(sprite);
                     }
                 }
                 animate();
             },
             undefined,
             function (error) {
-                output.textContent = 'Error loading brain.obj';
+                // You may want to display this elsewhere if you remove #output
+                // output.textContent = 'Error loading brain.obj';
             }
         );
 
+        // Animation loop for the brain scene
         function animate() {
             requestAnimationFrame(animate);
-            if (brainMesh) brainMesh.rotation.y += 0.01;
+            controls.update();
+            if (brainMesh && accelQuatInitialized) {
+                brainMesh.quaternion.slerp(targetQuaternion, 0.15);
+            } else if (brainMesh) {
+                brainMesh.rotation.y += 0.0033;
+            }
             renderer.render(scene, camera);
         }
 
+        // Handle window resizing for Three.js
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        function updateBrainHeatmap(normalized, band = "alpha") {
-            if (!brainMesh || !regionVertexMap) return;
+        // Update the brain mesh heatmap based on normalized EEG data
+        function updateBrainHeatmap(normalized) {
+            if (!brainMesh || !vertexSensorInfluence) return;
             const geometry = brainMesh.geometry;
             const colorAttr = geometry.attributes.color;
+            const lerpFactor = 0.1;
 
-            for (let regionIdx = 0; regionIdx < regionVertexMap.length; regionIdx++) {
-                const value = normalized[band][regionIdx];
-                const color = valueToHeatColor(value);
+            const sensorDominantColors = [];
+            for (let s = 0; s < sensorNames.length; s++) {
+                let maxBand = null;
+                let maxValue = -Infinity;
+                for (const band of BAND_ORDER) {
+                    const bandPower = normalized[band]?.[s] ?? 0;
+                    if (bandPower > maxValue) {
+                        maxValue = bandPower;
+                        maxBand = band;
+                    }
+                }
+                let baseColor = BAND_COLORS[maxBand];
+                let targetColor = {
+                    r: baseColor.r * maxValue,
+                    g: baseColor.g * maxValue,
+                    b: baseColor.b * maxValue,
+                    intensity: maxValue
+                };
+                let prev = prevSensorDominantColors[s] || { r: 0, g: 0, b: 0, intensity: 0 };
+                let lerped = {
+                    r: prev.r + (targetColor.r - prev.r) * lerpFactor,
+                    g: prev.g + (targetColor.g - prev.g) * lerpFactor,
+                    b: prev.b + (targetColor.b - prev.b) * lerpFactor,
+                    intensity: prev.intensity + (targetColor.intensity - prev.intensity) * lerpFactor
+                };
+                sensorDominantColors[s] = lerped;
+                prevSensorDominantColors[s] = lerped;
+            }
 
-                regionVertexMap[regionIdx].forEach(i => {
-                    colorAttr.setXYZ(i, color.r, color.g, color.b);
-                });
+            for (let i = 0; i < vertexSensorInfluence.length; i++) {
+                const influences = vertexSensorInfluence[i];
+                if (!influences.length || !baselineReady) {
+                    colorAttr.setXYZ(i, FLESHY_PINK.r, FLESHY_PINK.g, FLESHY_PINK.b);
+                    continue;
+                }
+                let r = 0, g = 0, b = 0, totalWeight = 0;
+                for (const { sensorIdx, weight } of influences) {
+                    const c = sensorDominantColors[sensorIdx];
+                    r += c.r * weight;
+                    g += c.g * weight;
+                    b += c.b * weight;
+                    totalWeight += weight;
+                }
+                if (totalWeight > 0) {
+                    colorAttr.setXYZ(i, r / totalWeight, g / totalWeight, b / totalWeight);
+                } else {
+                    colorAttr.setXYZ(i, FLESHY_PINK.r, FLESHY_PINK.g, FLESHY_PINK.b);
+                }
             }
             colorAttr.needsUpdate = true;
         }
 
-        function valueToHeatColor(val) {
-            val = Math.max(0, Math.min(1, val));
-            return new THREE.Color().setRGB(val, 0, 1 - val);
+        // Helper to create sensor label sprites
+        function makeTextSprite(message) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = 'Bold 32px Arial';
+            context.fillStyle = 'rgba(255,255,255,1.0)';
+            context.strokeStyle = 'rgba(0,0,0,1.0)';
+            context.lineWidth = 4;
+            context.strokeText(message, 2, 32);
+            context.fillText(message, 2, 32);
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(0.2, 0.1, 1.0);
+            return sprite;
         }
+
+        // --- TODO: Actual baseline collection and live data start/stop logic to be integrated with Startup Sequence and Menu actions. ---
+        // --- TODO: Replace Placement Assist 3D box with your Crown model and refine accelerometer logic as needed. ---
     </script>
 </body>
 </html>

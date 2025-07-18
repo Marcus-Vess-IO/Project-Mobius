@@ -91,6 +91,39 @@ async function startNeurosityBackend(ipcSender) {
 
         let timerStarted = false;
 
+        // --- Accelerometer subscription ---
+        neurosity.accelerometer().subscribe({
+            next: (accelData) => {
+                // Forward to renderer
+                if (ipcSender && !ipcSender.isDestroyed()) {
+                    ipcSender.webContents.send('accelerometer-data', accelData);
+                }
+            },
+            error: (err) => {
+                console.error("Accelerometer subscription error:", err);
+                if (ipcSender && !ipcSender.isDestroyed()) {
+                    ipcSender.webContents.send('neurosity-error', err.message || String(err));
+                }
+            }
+        });
+
+        // --- Signal Quality subscription ---
+        neurosity.signalQuality().subscribe({
+            next: (qualityData) => {
+                // Forward to renderer
+                if (ipcSender && !ipcSender.isDestroyed()) {
+                    ipcSender.webContents.send('signal-quality', qualityData);
+                }
+            },
+            error: (err) => {
+                console.error("Signal quality subscription error:", err);
+                if (ipcSender && !ipcSender.isDestroyed()) {
+                    ipcSender.webContents.send('neurosity-error', err.message || String(err));
+                }
+            }
+        });
+
+        // --- Brainwaves subscription ---
         const subscription = neurosity.brainwaves("powerByBand").subscribe({
             next: (data) => {
                 if (
