@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>StateSense + MindSight</title>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background: #d8dee6; }
+        #menu { position: absolute; left: 0; top: 0; width: 220px; height: 100vh; background: #222c; color: #fff; z-index: 10; }
+        #menu button, #menu input[type="color"] { display: block; margin: 16px; width: 80%; }
+        #overlay, #modal { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 100; display: none; align-items: center; justify-content: center; }
+        #overlay.active, #modal.active { display: flex; }
+        #brain-canvas { position: absolute; left: 220px; top: 0; width: calc(100vw - 220px); height: 100vh; }
+        #mood-indicator { position: absolute; right: 24px; top: 24px; background: #fff8; padding: 12px 24px; border-radius: 8px; font-size: 1.2em; z-index: 20; }
+        #legend { position:absolute; right:24px; top:72px; background:#fff8; padding:14px 24px; border-radius:8px; font-size:1em; z-index:21; box-shadow:0 2px 8px #0002; }
+        #legend .legend-row { margin-top:8px; }
+        #legend .legend-color { display:inline-block;width:18px;height:18px;border-radius:4px;margin-right:8px;vertical-align:middle; }
+    </style>
+</head>
+<body>
+    <!-- Sidebar/Menu -->
+    <div id="menu">
+        <h2>Menu</h2>
+        <button id="full-restart-btn">Restart App</button>
+        <button id="placement-btn">Placement Assist</button>
+        <button id="spheres-btn">Toggle Spheres</button>
+        <div>
+            <label>LED Mode:</label>
+            <select id="led-mode">
+                <option value="auto">Auto</option>
+                <option value="manual">Manual</option>
+            </select>
+            <input type="color" id="led-color" value="#ffff00" style="display:none;">
+        </div>
+    </div>
+
+    <!-- Device Selection Modal -->
+    <div id="modal" class="active">
+        <div style="background:#fff; padding:40px 60px; border-radius:16px; box-shadow:0 4px 32px #0008;">
+            <h2>Select Device</h2>
+            <button id="device-a-btn">Crown A</button>
+            <button id="device-b-btn">Crown B</button>
+        </div>
+    </div>
+
+    <div id="startup-modal" style="display:none; position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:200; align-items:center; justify-content:center;">
+        <div id="startup-modal-content" style="background:#fff; padding:40px 60px; border-radius:16px; box-shadow:0 4px 32px #0008; text-align:center; min-width:340px; max-width:420px;">
+            <!-- Content injected by JS -->
+        </div>
+    </div>
+
+    <!-- Overlay for session phases, alerts, etc. -->
+    <div id="overlay"></div>
+
+    <!-- Mood/Emotion Display -->
+    <div id="mood-indicator" style="display:none;"></div>
+
+    <!-- Legend -->
+    <div id="legend">
+        <b>Legend</b>
+        <div class="legend-row">
+            <span class="legend-color" style="background:#b39ddb;"></span> Delta
+        </div>
+        <div class="legend-row">
+            <span class="legend-color" style="background:#3399f2;"></span> Theta
+        </div>
+        <div class="legend-row">
+            <span class="legend-color" style="background:#4caf50;"></span> Alpha
+        </div>
+        <div class="legend-row">
+            <span class="legend-color" style="background:#f44336;"></span> Beta
+        </div>
+        <div class="legend-row">
+            <span class="legend-color" style="background:#ffe600;"></span> Gamma
+        </div>
+    </div>
+
+    <!-- Three.js Canvas -->
+    <div id="brain-canvas"></div>
+
+    <script type="module">
+        import * as THREE from './three.module.js';
+        import { OrbitControls } from './OrbitControls.js';
+        import { OBJLoader } from './OBJLoader.js';
+
+        // --- UI Elements ---
+        const fullRestartBtn = document.getElementById('full-restart-btn');
+        const placementBtn = document.getElementById('placement-btn');
+        const spheresBtn = document.getElementById('spheres-btn');
+        const ledMode = document.getElementById('led-mode');
+        const ledColor = document.getElementById('led-color');
+        const deviceABtn = document.getElementById('device-a-btn');
+        const deviceBBtn = document.getElementById('device-b-btn');
+        const modal = document.getElementById('modal');
+        const overlay = document.getElementById('overlay');
+        const moodIndicator = document.getElementById('mood-indicator');
+        const startupModal = document.getElementById('startup-modal');
+        const startupModalContent = document.getElementById('startup-modal-content');
+
+        // --- EEG Band Colors and Order ---
+        const BAND_ORDER = ["delta", "theta", "alpha", "beta", "gamma"];
+        const BAND_COLORS = [
+            [0.7, 0.6, 0.85], // Delta (#b39ddb)
+            [0.2, 0.6, 0.95], // Theta (#3399f2)
+            [0.3, 0.7, 0.3],  // Alpha (#4caf50)
+            [0.95, 0.2, 0.2], // Beta  (#f44336)
+            [1.0, 0.9, 0.0]   // Gamma (#ffe600)
+        ];
+
+        // --- Fleshy Pink Color ---
+        const FLESHY_PINK = { r: 0.92, g: 0.71, b: 0.71 };
+
+        // --- State Variables ---
+        let brainMesh = null;
+        let sensorSpheres = [];
+        let labelSprites = [];
+        let vertexSensorInfluence = null;
+        let sensorNames = [];
+        let sensorPositions = [];
+        let accelQuatInitialized = false;
+        let targetQuaternion = new THREE.Quaternion();
+
+        let placementAssistActive = false;
+        let placementLevelStartTime = null;
+        let placementLevelTimeout = null;
+        let spheresVisible = false;
+        let signalQualityActive = false;
+        let bufferModalShownAt = 0;
+        const MIN_BUFFER_MODAL_MS = 1200;
+
+        // --- Three.js Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xd8dee6);
+
+        const camera = new THREE.PerspectiveCamera(45, (window.innerWidth-220)/window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.5, 3);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth - 220, window.innerHeight);
+        renderer.setClearColor(0xd8dee6);
+        document.getElementById('brain-canvas').appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 1, 0);
+
+        // --- Lighting ---
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+        hemiLight.position.set(0, 20, 0);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        dirLight.position.set(5, 10, 7.5);
+        scene.add(dirLight);
+
+        // --- Helper: Make Text Sprite for Labels ---
+        function makeTextSprite(text) {
+            const size = 256;
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold 72px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#fff';
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 6;
+            ctx.strokeText(text, size/2, size/2);
+            ctx.fillStyle = '#222';
+            ctx.fillText(text, size/2, size/2);
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+            const sprite = new THREE.Sprite(material);
+            sprite.scale.set(0.18, 0.09, 1);
+            return sprite;
+        }
+
+        // --- Load Brain OBJ ---
+        const loader = new OBJLoader();
+        loader.load('./brain.obj', (object) => {
+            object.traverse(child => {
+                if (child.isMesh) {
+                    brainMesh = child;
+                    brainMesh.geometry.computeVertexNormals();
+                    const posAttr = brainMesh.geometry.attributes.position;
+                    const colors = [];
+                    for (let i = 0; i < posAttr.count; i++) {
+                        colors.push(FLESHY_PINK.r, FLESHY_PINK.g, FLESHY_PINK.b);
+                    }
+                    brainMesh.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                    brainMesh.material = new THREE.MeshStandardMaterial({ vertexColors: true });
+                    brainMesh.material.needsUpdate = true;
+                }
+            });
+            brainMesh.position.y = 0.5
+            scene.add(brainMesh);
+
+            // --- Sensor Spheres & Labels ---
+            const electrodeDefs = [
+                { name: 'CP3', x: -0.2, y: 1.1, z: -0.4 },
+                { name: 'C3',  x: -0.2, y: 1.2, z: 0.0 },
+                { name: 'F5',  x: -0.25,  y: 1.1, z: 0.4 },
+                { name: 'PO3', x: -0.15,  y: 0.9, z: -0.6 },
+                { name: 'PO4', mirrorFrom: 'PO3' },
+                { name: 'F6',  mirrorFrom: 'F5' },
+                { name: 'C4',  mirrorFrom: 'C3' },
+                { name: 'CP4', mirrorFrom: 'CP3' }
+            ];
+            sensorNames = [];
+            sensorPositions = [];
+            const nameToIndex = {};
+            for (let i = 0; i < electrodeDefs.length; i++) {
+                const def = electrodeDefs[i];
+                sensorNames.push(def.name);
+                if (def.mirrorFrom) {
+                    const mirrorIdx = nameToIndex[def.mirrorFrom];
+                    const mirrorPos = sensorPositions[mirrorIdx];
+                    sensorPositions.push(new THREE.Vector3(-mirrorPos.x, mirrorPos.y, mirrorPos.z));
+                } else {
+                    sensorPositions.push(new THREE.Vector3(def.x, def.y, def.z));
+                }
+                nameToIndex[def.name] = i;
+            }
+            for (let i = 0; i < sensorPositions.length; i++) {
+                const sphereGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+                const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+                const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+                sphere.position.copy(sensorPositions[i]);
+                brainMesh.add(sphere);
+                sensorSpheres[i] = sphere;
+                sphere.visible = false; // default hidden
+
+                // Add label sprite
+                const sprite = makeTextSprite(sensorNames[i]);
+                sprite.position.copy(sensorPositions[i]);
+                sprite.position.y += 0.08;
+                brainMesh.add(sprite);
+                labelSprites[i] = sprite;
+                sprite.visible = false; // default hidden
+            }
+            // Map mesh vertices to sensors for heatmap coloring
+            const posAttr = brainMesh.geometry.attributes.position;
+            const SENSOR_RADIUS = 0.3;
+            vertexSensorInfluence = [];
+            for (let i = 0; i < posAttr.count; i++) {
+                const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+                let influences = [];
+                let totalWeight = 0;
+                for (let s = 0; s < sensorPositions.length; s++) {
+                    const dist = v.distanceTo(sensorPositions[s]);
+                    if (dist < SENSOR_RADIUS) {
+                        const weight = 1 - (dist / SENSOR_RADIUS);
+                        influences.push({ sensorIdx: s, weight });
+                        totalWeight += weight;
+                    }
+                }
+                if (totalWeight > 0) {
+                    influences.forEach(inf => inf.weight /= totalWeight);
+                }
+                vertexSensorInfluence.push(influences);
+            }
+        });
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            if (brainMesh) {
+                if (accelQuatInitialized) {
+                    brainMesh.quaternion.slerp(targetQuaternion, 0.15);
+                } else {
+                    brainMesh.rotation.y += 0.0033;
+                }
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- Window Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = (window.innerWidth-220) / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth-220, window.innerHeight);
+        });
+
+        // --- Placement parameters for "good" placement ---
+        const FILLER_X_MIN = -0.05, FILLER_X_MAX = 0.05;
+        const FILLER_Y_MIN = -0.90, FILLER_Y_MAX = -0.70;
+
+        // --- Placement Assist: Draw Multi-Arrows on Canvas ---
+        function drawPlacementArrows(accel) {
+            const canvas = document.getElementById('placement-arrows');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw circle
+            ctx.save();
+            ctx.strokeStyle = "#bbb";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(60, 60, 50, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.restore();
+
+            // Arrow logic
+            const arrows = [];
+            if (accel.x < FILLER_X_MIN) arrows.push('left');
+            if (accel.x > FILLER_X_MAX) arrows.push('right');
+            if (accel.y < FILLER_Y_MIN) arrows.push('down');
+            if (accel.y > FILLER_Y_MAX) arrows.push('up');
+
+            // Draw arrows
+            arrows.forEach(dir => {
+                ctx.save();
+                ctx.translate(60, 60);
+                let angle = 0;
+                if (dir === 'up') angle = 0;
+                if (dir === 'right') angle = Math.PI / 2;
+                if (dir === 'down') angle = Math.PI;
+                if (dir === 'left') angle = -Math.PI / 2;
+                ctx.rotate(angle);
+
+                // Arrow shape
+                ctx.beginPath();
+                ctx.moveTo(0, -40);
+                ctx.lineTo(10, -20);
+                ctx.lineTo(4, -20);
+                ctx.lineTo(4, 30);
+                ctx.lineTo(-4, 30);
+                ctx.lineTo(-4, -20);
+                ctx.lineTo(-10, -20);
+                ctx.closePath();
+                ctx.fillStyle = "#e57373";
+                ctx.fill();
+                ctx.restore();
+            });
+
+            // If all good, draw a green check
+            if (arrows.length === 0) {
+                ctx.save();
+                ctx.strokeStyle = "#4caf50";
+                ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.moveTo(40, 65);
+                ctx.lineTo(55, 80);
+                ctx.lineTo(80, 45);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // --- Placement Assist Handler ---
+        let placementGood = false;
+        let placementGoodStart = null;
+
+        function placementAssistAccelHandler(event) {
+            const accel = event.detail;
+            const placementAssistMessageModal = document.getElementById('placement-assist-message-modal');
+            drawPlacementArrows(accel);
+
+            const good =
+                accel.x >= FILLER_X_MIN && accel.x <= FILLER_X_MAX &&
+                accel.y >= FILLER_Y_MIN && accel.y <= FILLER_Y_MAX;
+            if (good) {
+                if (!placementGood) {
+                    placementGood = true;
+                    placementGoodStart = Date.now();
+                }
+                if (placementAssistMessageModal) placementAssistMessageModal.textContent = "Crown is properly positioned! Hold steady...";
+                if (placementGoodStart && (Date.now() - placementGoodStart > 2000)) {
+                    window.removeEventListener('accelerometer-data', placementAssistAccelHandler);
+                    hideStartupModal();
+                    window.electronAPI.send('placement-complete');
+                }
+            } else {
+                placementGood = false;
+                placementGoodStart = null;
+                if (placementAssistMessageModal) placementAssistMessageModal.textContent = "Adjust the headset until the crown is properly positioned.";
+            }
+        }
+
+        // --- Utility: Convert hex color to {r,g,b} ---
+        function hexToRgb(hex) {
+            hex = hex.replace(/^#/, '');
+            if (hex.length === 3) hex = hex.split('').map(x => x + x).join('');
+            const num = parseInt(hex, 16);
+            return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+        }
+
+        // --- Show/hide modal helpers ---
+        function showStartupModal(html) {
+            startupModalContent.innerHTML = html;
+            startupModal.style.display = "flex";
+        }
+        function hideStartupModal() {
+            startupModal.style.display = "none";
+        }
+
+        // --- Electron API event bridging ---
+        window.addEventListener('DOMContentLoaded', () => {
+            window.electronAPI.onBaselineComplete((event, data) => {
+                window.dispatchEvent(new CustomEvent('baseline-complete', { detail: data }));
+            });
+            window.electronAPI.onSessionPhase((event, data) => {
+                window.dispatchEvent(new CustomEvent('session-phase', { detail: data }));
+            });
+            window.electronAPI.onNormalizedData((event, data) => {
+                window.dispatchEvent(new CustomEvent('normalized-data', { detail: data }));
+            });
+            window.electronAPI.onMood((event, data) => {
+                window.dispatchEvent(new CustomEvent('mood', { detail: data }));
+            });
+            window.electronAPI.onArtifactAlert(() => {
+                window.dispatchEvent(new CustomEvent('artifact-alert'));
+            });
+            window.electronAPI.onNeurosityError((event, data) => {
+                window.dispatchEvent(new CustomEvent('neurosity-error', { detail: data }));
+            });
+            window.electronAPI.onDeviceConnected(() => {
+                window.dispatchEvent(new CustomEvent('device-connected'));
+            });
+            window.electronAPI.onResetUI(() => {
+                window.dispatchEvent(new CustomEvent('reset-ui'));
+            });
+            window.electronAPI.onAccelerometerData((event, data) => {
+                window.dispatchEvent(new CustomEvent('accelerometer-data', { detail: data }));
+            });
+            window.electronAPI.onBufferProgress((event, progress) => {
+                window.dispatchEvent(new CustomEvent('buffer-progress', { detail: progress }));
+            });
+
+            // Device selection
+            deviceABtn.onclick = () => window.electronAPI.send('select-device', 0);
+            deviceBBtn.onclick = () => window.electronAPI.send('select-device', 1);
+
+            // Placement Assist Overlay Logic (Menu Button)
+            placementBtn.onclick = () => {
+                window.electronAPI.send('start-placement-assist');
+            };
+
+            // Spheres/Signal Quality toggles
+            spheresBtn.onclick = () => {
+                spheresVisible = !spheresVisible;
+                sensorSpheres.forEach(s => s.visible = spheresVisible);
+                labelSprites.forEach(l => l.visible = spheresVisible);
+            };
+            ledMode.onchange = () => {
+                if (ledMode.value === "manual") {
+                    ledColor.style.display = "";
+                    window.electronAPI.send('set-led-override', hexToRgb(ledColor.value));
+                } else {
+                    ledColor.style.display = "none";
+                    window.electronAPI.send('clear-led-override');
+                }
+            };
+            ledColor.oninput = () => {
+                if (ledMode.value === "manual") {
+                    window.electronAPI.send('set-led-override', hexToRgb(ledColor.value));
+                }
+            };
+
+            // Full Restart Button
+            fullRestartBtn.onclick = () => window.electronAPI.send('full-restart');
+
+            // --- DOM event listeners ---
+            window.addEventListener('baseline-complete', () => {
+                overlay.classList.remove('active');
+            });
+
+            window.addEventListener('session-phase', e => {
+                const phase = e.detail;
+                placementAssistActive = false;
+                placementLevelStartTime = null;
+                if (placementLevelTimeout) { clearTimeout(placementLevelTimeout); placementLevelTimeout = null; }
+                if (phase === "placement" || phase === "placement-assist") {
+                    showStartupModal(`
+                        <h2>Placement Assist</h2>
+                        <div style="font-size:1.2em; margin:18px 0 0 0;">Adjust the headset until you see a green check.</div>
+                        <div style="display:flex; flex-direction:column; align-items:center; margin-top:24px;">
+                            <canvas id="placement-arrows" width="120" height="120" style="background:#f8f8f8; border-radius:60px; box-shadow:0 2px 8px #0002;"></canvas>
+                            <div id="placement-assist-message-modal" style="margin-top:18px; font-size:1.2em;">Adjust the headset until the crown is properly positioned.</div>
+                        </div>
+                        <button id="placement-exit-btn" style="margin-top:24px;">Done</button>
+                    `);
+                    document.getElementById('placement-exit-btn').onclick = () => {
+                        placementAssistActive = false;
+                        hideStartupModal();
+                        if (placementLevelTimeout) { clearTimeout(placementLevelTimeout); placementLevelTimeout = null; }
+                        placementLevelStartTime = null;
+                        window.electronAPI.send('placement-complete');
+                    };
+                    return;
+                }
+                if (phase === "relax") {
+                    showStartupModal(`
+                        <h2>Relax</h2>
+                        <div style="font-size:1.2em; margin:18px 0 0 0;">Please remain still and relaxed.</div>
+                    `);
+                } else if (phase === "buffering") {
+                    bufferModalShownAt = Date.now();
+                    showStartupModal(`
+                        <h2>Buffering</h2>
+                        <div style="font-size:1.2em; margin:18px 0 0 0;">Buffering... Please relax.</div>
+                        <div class="progress-bar" style="margin:24px auto 0 auto; width:180px; height:12px; background:#eee; border-radius:6px; overflow:hidden;">
+                            <div id="buffer-progress" style="height:100%; width:0%; background:#b39ddb; transition:width 0.3s;"></div>
+                        </div>
+                    `);
+                    const progressBar = document.getElementById('buffer-progress');
+                    if (progressBar) {
+                        progressBar.style.width = "0%";
+                    }
+                } else if (phase === "live") {
+                    const elapsed = Date.now() - bufferModalShownAt;
+                    if (elapsed < MIN_BUFFER_MODAL_MS) {
+                        setTimeout(() => hideStartupModal(), MIN_BUFFER_MODAL_MS - elapsed);
+                    } else {
+                        hideStartupModal();
+                    }
+                }
+            });
+
+            window.addEventListener('buffer-progress', e => {
+                const progress = e.detail;
+                const progressBar = document.getElementById('buffer-progress');
+                if (progressBar) {
+                    progressBar.style.width = (progress * 100) + "%";
+                }
+            });
+
+            window.addEventListener('normalized-data', e => {
+                if (!brainMesh || !vertexSensorInfluence) return;
+                const normalized = e.detail;
+                const geometry = brainMesh.geometry;
+                const colorAttr = geometry.attributes.color;
+                // For each channel, find its dominant band
+                const sensorDominantColors = [];
+                for (let s = 0; s < sensorNames.length; s++) {
+                    let maxBand = null, maxValue = -Infinity;
+                    for (let b = 0; b < BAND_ORDER.length; b++) {
+                        const val = normalized[BAND_ORDER[b]]?.[s] ?? 0;
+                        if (val > maxValue) {
+                            maxValue = val;
+                            maxBand = b;
+                        }
+                    }
+                    sensorDominantColors[s] = BAND_COLORS[maxBand] || [FLESHY_PINK.r, FLESHY_PINK.g, FLESHY_PINK.b];
+                }
+                // Color each vertex by weighted sensor influence, fallback to fleshy pink if no influence
+                for (let i = 0; i < colorAttr.count; i++) {
+                    let r = 0, g = 0, b = 0;
+                    if (!vertexSensorInfluence[i] || vertexSensorInfluence[i].length === 0) {
+                        r = FLESHY_PINK.r;
+                        g = FLESHY_PINK.g;
+                        b = FLESHY_PINK.b;
+                    } else {
+                        vertexSensorInfluence[i].forEach(inf => {
+                            const c = sensorDominantColors[inf.sensorIdx];
+                            r += c[0] * inf.weight;
+                            g += c[1] * inf.weight;
+                            b += c[2] * inf.weight;
+                        });
+                    }
+                    colorAttr.setXYZ(i, r, g, b);
+                }
+                colorAttr.needsUpdate = true;
+            });
+
+            window.addEventListener('mood', e => {
+                const { emotion } = e.detail;
+                moodIndicator.innerText = `Mood: ${emotion}`;
+                moodIndicator.style.display = "block";
+            });
+
+            window.addEventListener('artifact-alert', () => {
+                overlay.innerText = "Artifact detected! Please remain still.";
+                overlay.classList.add('active');
+                setTimeout(() => overlay.classList.remove('active'), 2000);
+            });
+
+            window.addEventListener('neurosity-error', e => {
+                overlay.innerText = "Device Error: " + e.detail;
+                overlay.classList.add('active');
+            });
+
+            window.addEventListener('device-connected', () => {
+                modal.classList.remove('active');
+            });
+
+            window.addEventListener('reset-ui', () => {
+                overlay.classList.remove('active');
+                overlay.innerText = "";
+                moodIndicator.style.display = "none";
+                spheresVisible = false;
+                signalQualityActive = false;
+                placementAssistActive = false;
+                sensorSpheres.forEach(s => s.visible = false);
+                labelSprites.forEach(l => l.visible = false);
+                if (brainMesh && brainMesh.geometry && brainMesh.geometry.attributes.color) {
+                    const colorAttr = brainMesh.geometry.attributes.color;
+                    for (let i = 0; i < colorAttr.count; i++) {
+                        colorAttr.setXYZ(i, FLESHY_PINK.r, FLESHY_PINK.g, FLESHY_PINK.b);
+                    }
+                    colorAttr.needsUpdate = true;
+                }
+                accelQuatInitialized = false;
+            });
+
+            window.addEventListener('accelerometer-data', (event) => {
+                const accel = event.detail;
+                // For brain orientation (main 3D model)
+                if (brainMesh && accel && typeof accel.x === "number" && typeof accel.y === "number" && typeof accel.z === "number") {
+                    const down = new THREE.Vector3(-accel.x, accel.y, accel.z).normalize();
+                    const modelDown = new THREE.Vector3(0, -1, 0);
+                    const quat = new THREE.Quaternion().setFromUnitVectors(modelDown, down);
+                    const tiltQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), THREE.MathUtils.degToRad(-15));
+                    quat.multiply(tiltQuat);
+                    targetQuaternion.copy(quat);
+                    accelQuatInitialized = true;
+                }
+                // For placement assist modal (if active)
+                if (document.getElementById('placement-arrows')) {
+                    placementAssistAccelHandler({ detail: accel });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

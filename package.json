@@ -1,12 +1,11 @@
 {
   "name": "hello-world",
   "version": "1.0.0",
-  "description": "First attempt at using Neurosity SDK",
-  "main": "apps/stateSense/main.cjs",
+  "description": "Using Neurosity SDK with Electron for Rare Evo 2025",
+  "main": "main.cjs",
   "type": "module",
   "scripts": {
-    "start": "electron ./apps/stateSense/main.cjs",
-    "NCback": "node ./apps/neuralControl/index.js"
+    "start": "electron ./main.cjs"
   },
   "keywords": [
     "neurosity"
@@ -15,7 +14,9 @@
   "license": "MIT",
   "dependencies": {
     "@neurosity/sdk": "^6.5.10",
-    "dotenv": "^16.5.0"
+    "dotenv": "^16.5.0",
+    "serialport": "^13.0.0",
+    "three": "^0.179.1"
   },
   "devDependencies": {
     "electron": "^37.2.0"
