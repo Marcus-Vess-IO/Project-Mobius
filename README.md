@@ -101,13 +101,13 @@ hello-world/
 ## Setup & Installation
 
 1. **Clone the repository**
-    ```
+    ```sh
     git clone https://github.com/YOUR-ORG/hello-world.git
     cd hello-world
     ```
 
 2. **Install dependencies**
-    ```
+    ```sh
     npm install
     ```
 
@@ -131,7 +131,7 @@ hello-world/
 
 ## Running the Application
 
-```
+```sh
 npm start
 ```
 - App launches in fullscreen.
